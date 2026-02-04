@@ -5,6 +5,8 @@ import pickle
 from sklearn.metrics import accuracy_score, precision_score, recall_score, roc_auc_score
 import logging
 import json
+import yaml 
+from dvclive import Live
 
 log_dir = 'logs'
 os.makedirs(log_dir, exist_ok=True)
@@ -28,6 +30,26 @@ file_handler.setFormatter(formatter)
 
 logger.addHandler(console_handler)
 logger.addHandler(file_handler)
+
+def load_params(params_path: str) -> dict:
+    """Load parameters from a YAML file"""
+
+    try:
+        with open(params_path, 'r') as file:
+            params = yaml.safe_load(file)
+
+        logger.debug("Parameters retrieved from %s", params_path)
+        return params
+    
+    except FileNotFoundError:
+        logger.error("File not found: %s", params_path)
+        raise
+    except yaml.YAMLError as e:
+        logger.error("YAML error: %s",e)
+        raise
+    except Exception as e:
+        logger.error("Unexpecteed error: %s", e)
+        raise 
 
 def load_model(file_path: str):
 
@@ -85,7 +107,7 @@ def evaluate_model(clf, x_test: np.ndarray, y_test:np.ndarray) -> dict:
             "auc":auc
         }
         logger.debug("Model evaluation metrics calculated")
-        return metrics_dict
+        return y_pred,metrics_dict
     except Exception as e:
         logger.error("Error during model evaluation %s",e)
         raise 
@@ -111,6 +133,7 @@ def main():
 
     try:
 
+        params = load_params(params_path='params.yaml')
         clf = load_model("./model/model.pkl")
         test_data = load_data("./data/processed/test_tfidf.csv")
         
@@ -118,7 +141,15 @@ def main():
         x_test = test_data.iloc[:,:-1].values
         y_test = test_data.iloc[:,-1].values
 
-        metrics = evaluate_model(clf, x_test, y_test)
+        y_pred, metrics = evaluate_model(clf, x_test, y_test)
+
+        # Experiment tracking using dvclive'
+        with Live(save_dvc_exp=True) as live:
+            live.log_metric("accuracy",accuracy_score(y_test, y_pred))
+            live.log_metric("precision",precision_score(y_test,y_pred))
+            live.log_metric("recall",recall_score(y_test,y_pred))
+
+            live.log_params(params) 
 
         save_metrics(metrics, "reports/metrics.json")
 
